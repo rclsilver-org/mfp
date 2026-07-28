@@ -1,0 +1,56 @@
+# Local dev stack for the scan app (Linux / host networking).
+#   Keycloak  -> http://localhost:8081   (admin/admin, realm "scan", dev users / devpass)
+#   Backend   -> http://localhost:8080
+#   Frontend  -> http://localhost:5173   (open this)
+#   MailHog   -> http://localhost:8025   (catches scan emails)
+# Site-specific addresses (LDAP, scanner) come from ./.env (gitignored; see .env.example).
+# The dev Keycloak realm is ./dev/realm-scan.json (gitignored; see realm-scan.example.json).
+# NOTHING is printed; nothing touches prod.
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    command: ["start-dev", "--import-realm", "--http-port=8081"]
+    network_mode: host
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_HOSTNAME_STRICT: "false"
+    volumes:
+      - ./dev/realm-scan.json:/opt/keycloak/data/import/realm-scan.json:ro
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    network_mode: host   # SMTP 1025, UI 8025
+
+  backend:
+    build: ./backend
+    network_mode: host
+    working_dir: /app
+    command: ["uvicorn", "scanapp.main:app", "--host", "0.0.0.0", "--port", "8080", "--reload"]
+    environment:
+      SCANAPP_OIDC_ISSUER: http://localhost:8081/realms/scan
+      SCANAPP_OIDC_CLIENT_ID: scan
+      SCANAPP_LDAP_URL: ${SCANAPP_LDAP_URL:-ldap://ldap.example.com:389}
+      SCANAPP_LDAP_USER_BASE: ${SCANAPP_LDAP_USER_BASE:-ou=people,dc=example,dc=com}
+      SCANAPP_LDAP_GROUP_BASE: ${SCANAPP_LDAP_GROUP_BASE:-ou=groups,dc=example,dc=com}
+      SCANAPP_ESCL_BASE_URL: ${SCANAPP_ESCL_BASE_URL:-http://printer.example.com}
+      # dev: generate realistic fake pages (no real scan). Set to "false" to use the real device.
+      SCANAPP_FAKE_SCANNER: "true"
+      SCANAPP_SMTP_HOST: localhost
+      SCANAPP_SMTP_PORT: "1025"
+      SCANAPP_SCRATCH_DIR: /data/scratch
+      SCANAPP_DB_PATH: /data/scanapp.db
+      SCANAPP_PRINTER_DIR: /printer
+      SCANAPP_CORS_ORIGINS: http://localhost:5173
+    volumes:
+      - ./backend:/app
+      - ./dev/data:/data
+      - ./dev/data/printer:/printer
+
+  frontend:
+    image: node:20-slim
+    network_mode: host
+    working_dir: /app
+    command: ["sh", "-lc", "npm install && npm run dev -- --host --port 5173"]
+    volumes:
+      - ./frontend:/app

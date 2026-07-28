@@ -1,0 +1,49 @@
+{
+  "_comment": "Dev Keycloak realm template. Copy to realm-scan.json (gitignored) and set the usernames to REAL LDAP uids so group authorization (printers/administrators) resolves against your LDAP. Passwords are dev-only.",
+  "realm": "scan",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "clients": [
+    {
+      "clientId": "scan",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["http://localhost:5173/*", "http://localhost:8080/*", "http://127.0.0.1:5173/*"],
+      "webOrigins": ["*"],
+      "attributes": { "pkce.code.challenge.method": "S256", "post.logout.redirect.uris": "+" }
+    }
+  ],
+  "users": [
+    {
+      "username": "admin.user",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "admin.user@example.com",
+      "firstName": "Admin",
+      "lastName": "User",
+      "credentials": [{ "type": "password", "value": "devpass", "temporary": false }]
+    },
+    {
+      "username": "regular.user",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "regular.user@example.com",
+      "firstName": "Regular",
+      "lastName": "User",
+      "credentials": [{ "type": "password", "value": "devpass", "temporary": false }]
+    },
+    {
+      "username": "guest.user",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "guest.user@example.com",
+      "firstName": "Guest",
+      "lastName": "User",
+      "credentials": [{ "type": "password", "value": "devpass", "temporary": false }]
+    }
+  ]
+}
