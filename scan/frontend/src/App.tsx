@@ -95,6 +95,7 @@ export default function App() {
   const [caps, setCaps] = useState<any>(null);
   const [status, setStatus] = useState<any>(null);
   const [users, setUsers] = useState<User[]>([]);
+  const [resumable, setResumable] = useState<any[]>([]);
 
   const [sid, setSid] = useState<string>("");
   const [pages, setPages] = useState<Page[]>([]);
@@ -133,6 +134,7 @@ export default function App() {
       setMe(m);
       if (m.can_scan) {
         api("/scanner/capabilities").then(r => r.json()).then(setCaps).catch(() => {});
+        loadResumable();
       }
       if (m.is_admin) api("/users").then(r => r.json()).then(setUsers).catch(() => {});
     });
@@ -158,6 +160,20 @@ export default function App() {
     setPages(s.pages || []);
     setBatches(s.batches || []);
     setSaved(s.saved_history_id ? { id: s.saved_history_id, filename: s.saved_filename } : null);
+  }
+
+  function loadResumable() {
+    api("/sessions/resumable").then(r => r.json()).then(setResumable).catch(() => {});
+  }
+
+  async function resumeSession(id: string, name: string) {
+    setFinRes(null); setMsg(""); setDocName(name || ""); setSid(id);
+    await refresh(id);
+  }
+
+  async function discardSession(id: string) {
+    await api(`/sessions/${id}`, { method: "DELETE" });
+    loadResumable();
   }
 
   const batchLabel = (bid: string) => {
@@ -214,7 +230,10 @@ export default function App() {
     const r = await api(`/sessions/${sid}/finalize`, { method: "POST", body: JSON.stringify({ name: docName, deliveries: [], overwrite }) });
     if (!r.ok) { setMsg("Erreur enregistrement: " + (await r.text())); return; }
     setFinRes(await r.json());
-    await refresh(sid);
+    // the document is now saved and its scratch is gone: start a fresh document so
+    // the next scan is a new document, not an edit of the one we just saved.
+    setSid(""); setPages([]); setBatches([]); setSaved(null); setDocName("");
+    loadResumable();
   }
 
   async function downloadDoc(id: number, filename: string) {
@@ -264,6 +283,25 @@ export default function App() {
 
         {tab === "scan" && (me.can_scan ? (
           <>
+            {!sid && pages.length === 0 && resumable.length > 0 && (
+              <div className="card">
+                <b>Reprendre un document en cours</b>
+                <p className="note">Des travaux non enregistrés ont été retrouvés.</p>
+                {resumable.map(r => (
+                  <div key={r.id} className="row" style={{ justifyContent: "space-between", alignItems: "center", marginTop: ".4rem" }}>
+                    <span>
+                      <b>{r.name || "Sans titre"}</b> · {r.pages} page(s)
+                      {r.owner !== me.username && <> · pour <b>{r.owner}</b></>}
+                      <span className="note"> · {new Date(r.updated_at * 1000).toLocaleString()}</span>
+                    </span>
+                    <span style={{ display: "flex", gap: ".5rem" }}>
+                      <button onClick={() => resumeSession(r.id, r.name)}>Reprendre</button>
+                      <button className="secondary" onClick={() => discardSession(r.id)}>Annuler</button>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="card">
               <div className="status">
                 Scanner : {status ? <b>{status.state}{status.busy ? ` — occupé (${status.held_by})` : ""}</b> : "…"}
@@ -306,6 +344,13 @@ export default function App() {
               </div>
               {msg && <p className="err">{msg}</p>}
               {onBehalf && <p className="note">Ce document sera attribué à <b>{onBehalf}</b>.</p>}
+              {finRes && (
+                <p className="note">
+                  {finRes.overwritten ? "Écrasé" : "Enregistré"} : <b>{finRes.filename}</b>{" "}
+                  <span className={String(finRes.results?.archive).startsWith("error") ? "err" : "ok"}>✓</span>
+                  {finRes.id && <> · <button className="secondary" onClick={() => downloadDoc(finRes.id, finRes.filename)}>Télécharger</button></>}
+                </p>
+              )}
             </div>
 
             {pages.length > 0 && (
@@ -313,12 +358,6 @@ export default function App() {
                 <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
                   <b>{pages.length} page(s){saved ? ` · ${saved.filename}` : ""}</b>
                   <span style={{ display: "flex", gap: ".5rem", alignItems: "center" }}>
-                    {finRes && (
-                      <span className="note">
-                        {finRes.overwritten ? "Écrasé" : "Enregistré"} <span className={String(finRes.results?.archive).startsWith("error") ? "err" : "ok"}>✓</span>
-                        {finRes.id && <> · <button className="secondary" onClick={() => downloadDoc(finRes.id, finRes.filename)}>Télécharger</button></>}
-                      </span>
-                    )}
                     <button onClick={onSaveClick}>{saved ? "Enregistrer (écraser)" : "Enregistrer"}</button>
                   </span>
                 </div>
