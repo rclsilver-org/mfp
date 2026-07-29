@@ -140,6 +140,8 @@ class EsclClient:
         """Async generator yielding JPEG bytes, one per page."""
         feeder = source.lower() in ("adf", "feeder")
         body = self._scan_settings(source, color, resolution, page_size, fmt)
+        print(f"[escl] scan start source={source} color={color} res={resolution} "
+              f"size={page_size} base={self.base}", flush=True)
         async with self._client(timeout=settings.escl_job_timeout) as c:
             # HP eSCL is single-request: ANY other request too close to ScanJobs
             # (a status poll, or even our own pre-check) makes it return 503/409.
@@ -147,15 +149,21 @@ class EsclClient:
             # failure. Retry with backoff to ride over transient states.
             r = await c.post(f"{self.base}/eSCL/ScanJobs", content=body,
                              headers={"Content-Type": "text/xml"})
+            print(f"[escl] ScanJobs POST -> {r.status_code} loc={r.headers.get('Location')}", flush=True)
             attempt = 0
             while r.status_code in (409, 503) and attempt < 4:
                 attempt += 1
                 await asyncio.sleep(0.5 * attempt)
                 r = await c.post(f"{self.base}/eSCL/ScanJobs", content=body,
                                  headers={"Content-Type": "text/xml"})
+                print(f"[escl] ScanJobs POST retry {attempt} -> {r.status_code}", flush=True)
             if r.status_code in (409, 503):
-                # persistent conflict: the device is idle now, so it's safe to ask
-                # why. An empty feeder is the usual cause of a 409 here.
+                # dump the device state so we can see WHY it keeps rejecting us
+                try:
+                    raw = (await c.get(f"{self.base}/eSCL/ScannerStatus")).text
+                    print(f"[escl] give up {r.status_code}; ScannerStatus:\n{raw[:900]}", flush=True)
+                except Exception as e:  # noqa: BLE001
+                    print(f"[escl] give up {r.status_code}; status dump failed: {e}", flush=True)
                 if feeder:
                     adf_state = (await self.status()).get("adf_state") or ""
                     if adf_state and "Loaded" not in adf_state:
