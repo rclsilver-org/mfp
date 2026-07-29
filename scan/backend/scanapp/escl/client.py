@@ -138,19 +138,13 @@ class EsclClient:
     async def scan(self, *, source="platen", color="RGB24", resolution=300,
                    page_size="A4", fmt="image/jpeg"):
         """Async generator yielding JPEG bytes, one per page."""
-        # An empty ADF makes the device reject ScanJobs with 409 (indistinguishable
-        # from a busy 409). Pre-check the feeder so we can report "empty" clearly
-        # instead of retrying and surfacing a bogus "scanner busy".
-        if source.lower() in ("adf", "feeder"):
-            adf_state = (await self.status()).get("adf_state") or ""
-            if adf_state and "Loaded" not in adf_state:
-                raise AdfEmptyOrJam("Chargeur (ADF) vide — rechargez le document")
-
+        feeder = source.lower() in ("adf", "feeder")
         body = self._scan_settings(source, color, resolution, page_size, fmt)
         async with self._client(timeout=settings.escl_job_timeout) as c:
-            # HP eSCL is single-request: a concurrent request (e.g. a status poll)
-            # makes ScanJobs return 503/409. Retry with backoff to ride over the
-            # collision instead of surfacing a bogus "scanner busy".
+            # HP eSCL is single-request: ANY other request too close to ScanJobs
+            # (a status poll, or even our own pre-check) makes it return 503/409.
+            # So post the job FIRST (nothing before it), and only diagnose on
+            # failure. Retry with backoff to ride over transient states.
             r = await c.post(f"{self.base}/eSCL/ScanJobs", content=body,
                              headers={"Content-Type": "text/xml"})
             attempt = 0
@@ -160,6 +154,12 @@ class EsclClient:
                 r = await c.post(f"{self.base}/eSCL/ScanJobs", content=body,
                                  headers={"Content-Type": "text/xml"})
             if r.status_code in (409, 503):
+                # persistent conflict: the device is idle now, so it's safe to ask
+                # why. An empty feeder is the usual cause of a 409 here.
+                if feeder:
+                    adf_state = (await self.status()).get("adf_state") or ""
+                    if adf_state and "Loaded" not in adf_state:
+                        raise AdfEmptyOrJam("Chargeur (ADF) vide — rechargez le document")
                 raise ScannerBusy("scanner busy")
             if r.status_code not in (200, 201):
                 raise EsclError(f"ScanJobs failed: HTTP {r.status_code}")
