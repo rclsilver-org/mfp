@@ -78,7 +78,7 @@ async def _do_scan(session_id: str, options: dict) -> dict:
             page = Page(session_id=session_id, batch_id=batch.id, order_index=order, source=source, blob_key="")
             db.add(page)
             await db.flush()
-            path, w, h = imaging.save_original(session_id, page.id, jpeg)
+            path, w, h = imaging.save_original(sess.owner_username, session_id, page.id, jpeg)
             page.blob_key, page.width, page.height = path, w, h
             order += 10.0
             count += 1

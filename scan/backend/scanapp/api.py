@@ -323,15 +323,54 @@ async def _owned_history(hid: int, user: LdapUser) -> ScanHistory:
 
 @router.post("/history/{hid}/reopen")
 async def reopen_document(hid: int, user: LdapUser = Depends(current_user)):
+    """Re-open a document for editing. If the draft scratch is still around we
+    reuse it; otherwise (saved doc, scratch cleaned) we rebuild editable pages by
+    rasterizing the archived PDF."""
+    import os
     h = await _owned_history(hid, user)
-    if not h.session_id:
-        raise HTTPException(410, "document not editable")
     async with async_session() as db:
-        sess = await db.get(ScanSession, h.session_id)
-        pages = (await db.execute(select(Page).where(Page.session_id == h.session_id))).scalars().all()
-    if sess is None or not pages:
-        raise HTTPException(410, "document too old to re-open (session cleaned up)")
-    return {"session_id": sess.id, "name": h.name}
+        sess = await db.get(ScanSession, h.session_id) if h.session_id else None
+
+        # draft still intact -> reuse as-is
+        if sess is not None:
+            pages = (await db.execute(select(Page).where(Page.session_id == sess.id))).scalars().all()
+            if pages and all(p.blob_key and os.path.isfile(p.blob_key) for p in pages):
+                return {"session_id": sess.id, "name": h.name}
+
+        # otherwise rebuild from the archived PDF
+        if not h.archive_path or not os.path.isfile(h.archive_path):
+            raise HTTPException(410, "document not available for re-open")
+
+        if sess is None:
+            target = ldap.get_user(h.user)
+            sess = ScanSession(owner_username=h.user, performed_by=user.uid, name=h.name,
+                               owner_uid_number=target.uid_number if target else None,
+                               owner_email=target.mail if target else None)
+            db.add(sess)
+            await db.flush()
+        else:
+            await db.execute(delete(Page).where(Page.session_id == sess.id))
+            await db.execute(delete(Batch).where(Batch.session_id == sess.id))
+
+        sess.status = "draft"
+        sess.name = h.name
+        sess.saved_history_id = h.id
+        sess.saved_archive_path = h.archive_path
+        sess.saved_filename = os.path.basename(h.archive_path)
+
+        batch = Batch(session_id=sess.id, index=0, source="pdf", options={})
+        db.add(batch)
+        await db.flush()
+        order = 10.0
+        for jpeg in imaging.pdf_to_jpegs(h.archive_path):
+            page = Page(session_id=sess.id, batch_id=batch.id, order_index=order, source="pdf", blob_key="")
+            db.add(page)
+            await db.flush()
+            path, w, ht = imaging.save_original(sess.owner_username, sess.id, page.id, jpeg)
+            page.blob_key, page.width, page.height = path, w, ht
+            order += 10.0
+        await db.commit()
+        return {"session_id": sess.id, "name": h.name}
 
 
 @router.post("/documents/{hid}/email")

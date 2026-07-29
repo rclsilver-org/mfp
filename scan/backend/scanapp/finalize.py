@@ -8,11 +8,11 @@ from email.message import EmailMessage
 
 import aiosmtplib
 import img2pdf
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from .config import settings
 from . import imaging
-from .models import Page, ScanHistory, ScanSession, async_session
+from .models import Batch, Page, ScanHistory, ScanSession, async_session
 
 
 def _safe(name: str) -> str:
@@ -72,10 +72,8 @@ async def finalize(session_id: str, name: str, deliveries: list[str], overwrite:
             filename = f"{ts}_{safe}.pdf"
             dst = os.path.join(settings.scan_archive_dir, sess.owner_username, day, filename)
 
-        # build the PDF in scratch, then archive it (the canonical saved copy)
-        dl_dir = os.path.join(settings.scratch_dir, session_id, "output")
-        os.makedirs(dl_dir, exist_ok=True)
-        pdf_path = os.path.join(dl_dir, filename)
+        # build the PDF in the session scratch, then archive it (the canonical copy)
+        pdf_path = os.path.join(imaging.scratch_dir(sess.owner_username, session_id), filename)
         build_pdf(session_id, pages, pdf_path)
 
         results: dict[str, str] = {}
@@ -117,9 +115,16 @@ async def finalize(session_id: str, name: str, deliveries: list[str], overwrite:
         sess.saved_history_id = hist.id
         sess.saved_archive_path = archive_path
         sess.saved_filename = filename
-        await db.commit()
+        npages = len(pages)
 
-        return {"id": hist.id, "filename": filename, "pages": len(pages),
+        # scratch is cleaned on save; the archived PDF becomes the source for a
+        # later re-open (pages are re-rasterized from it). Drop the page/batch rows.
+        await db.execute(delete(Page).where(Page.session_id == session_id))
+        await db.execute(delete(Batch).where(Batch.session_id == session_id))
+        await db.commit()
+        imaging.cleanup_session(sess.owner_username, session_id)
+
+        return {"id": hist.id, "filename": filename, "pages": npages,
                 "results": results, "overwritten": bool(do_overwrite)}
 
 

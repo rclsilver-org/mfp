@@ -33,17 +33,22 @@ class Settings(BaseSettings):
     fake_scanner: bool = False
 
     # --- Storage ---
-    # One shared "printer" dataset (root:administrators 2750) with two similar trees:
-    #   {printer_dir}/scan-archive/<user>/YYYY/MM/DD/<ts>_<name>.pdf
-    #   {printer_dir}/print-archive/...  (+ .print-metrics.db, written by the CUPS proxy)
-    scratch_dir: str = "/data/scratch"
-    db_path: str = "/data/scanapp.db"
+    # One shared "printer" dataset (root:administrators 2750). Everything the scan
+    # app owns lives under scan-archive/ (like the CUPS proxy under print-archive/):
+    #   scan-archive/.scanapp.db                       -> the app's SQLite DB
+    #   scan-archive/<user>/YYYY/MM/DD/<ts>_<name>.pdf -> finalized documents
+    #   scan-archive/<user>/.scratch/<session>/        -> in-progress page images (transient)
     printer_dir: str = "/printer"
     archive_group: str = "administrators"
 
     @property
     def scan_archive_dir(self) -> str:
         return f"{self.printer_dir}/scan-archive"
+
+    @property
+    def db_path(self) -> str:
+        # kept next to the scan archive, mirroring print-archive/.print-metrics.db
+        return f"{self.scan_archive_dir}/.scanapp.db"
 
     @property
     def print_metrics_db(self) -> str:

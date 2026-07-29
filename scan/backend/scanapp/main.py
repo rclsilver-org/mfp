@@ -1,6 +1,7 @@
 """FastAPI application entrypoint."""
 from __future__ import annotations
 
+import asyncio
 import os
 from contextlib import asynccontextmanager
 
@@ -9,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from . import tasks
 from .api import router
 from .config import settings
 from .models import init_db
@@ -18,10 +20,13 @@ FRONTEND_DIR = os.environ.get("SCANAPP_FRONTEND_DIR", "/app/frontend")
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    os.makedirs(settings.scratch_dir, exist_ok=True)
-    os.makedirs(os.path.dirname(settings.db_path) or ".", exist_ok=True)
+    os.makedirs(settings.scan_archive_dir, exist_ok=True)  # holds the DB + per-user scratch
     await init_db()
-    yield
+    cleanup = asyncio.create_task(tasks.cleanup_loop())
+    try:
+        yield
+    finally:
+        cleanup.cancel()
 
 
 app = FastAPI(title="Scan", lifespan=lifespan)
