@@ -1,10 +1,12 @@
 """REST API for the scan app."""
 from __future__ import annotations
 
+import time
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 
 from . import history as history_mod
 from . import imaging, scanner
@@ -101,6 +103,30 @@ async def list_sessions(user: LdapUser = Depends(current_user)):
                  "updated_at": s.updated_at} for s in sess]
 
 
+@router.get("/sessions/resumable")
+async def resumable_sessions(user: LdapUser = Depends(current_user)):
+    """In-progress documents the current actor started (have pages, not expired).
+    Used to offer resuming unsaved work after a page reload (F5)."""
+    now = int(time.time())
+    async with async_session() as db:
+        rows = (await db.execute(
+            select(ScanSession)
+            .where(ScanSession.performed_by == user.uid)
+            .where(ScanSession.expires_at > now)
+            .order_by(ScanSession.updated_at.desc())
+        )).scalars().all()
+        out = []
+        for s in rows:
+            n = (await db.execute(
+                select(func.count()).select_from(Page).where(Page.session_id == s.id)
+            )).scalar_one()
+            if n:
+                out.append({"id": s.id, "name": s.name, "pages": n,
+                            "owner": s.owner_username, "updated_at": s.updated_at,
+                            "saved_filename": s.saved_filename})
+        return out
+
+
 @router.get("/sessions/{sid}")
 async def get_session(sid: str, user: LdapUser = Depends(current_user)):
     sess = await _owned_session(sid, user)
@@ -122,11 +148,11 @@ async def get_session(sid: str, user: LdapUser = Depends(current_user)):
 
 @router.delete("/sessions/{sid}")
 async def delete_session(sid: str, user: LdapUser = Depends(current_user)):
-    await _owned_session(sid, user)
+    sess = await _owned_session(sid, user)
     async with async_session() as db:
         await db.execute(delete(ScanSession).where(ScanSession.id == sid))
         await db.commit()
-    imaging.cleanup_session(sid)
+    imaging.cleanup_session(sess.owner_username, sid)
     return {"ok": True}
 
 
@@ -290,18 +316,6 @@ async def finalize_session(sid: str, body: Finalize, user: LdapUser = Depends(cu
         return await do_finalize(sid, body.name, body.deliveries, body.overwrite)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-
-
-@router.get("/sessions/{sid}/download")
-async def download(sid: str, user: LdapUser = Depends(current_user)):
-    import glob
-    import os
-    await _owned_session(sid, user)
-    out = sorted(glob.glob(os.path.join(settings.scratch_dir, sid, "output", "*.pdf")))
-    if not out:
-        raise HTTPException(404, "no finalized document")
-    path = out[-1]
-    return FileResponse(path, media_type="application/pdf", filename=os.path.basename(path))
 
 
 # ---------- history / users ----------

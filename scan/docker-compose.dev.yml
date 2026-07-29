@@ -38,8 +38,7 @@ services:
       SCANAPP_FAKE_SCANNER: "true"
       SCANAPP_SMTP_HOST: localhost
       SCANAPP_SMTP_PORT: "1025"
-      SCANAPP_SCRATCH_DIR: /data/scratch
-      SCANAPP_DB_PATH: /data/scanapp.db
+      # DB + per-user scratch derive from PRINTER_DIR (<printer>/scan-archive/...)
       SCANAPP_PRINTER_DIR: /printer
       SCANAPP_CORS_ORIGINS: http://localhost:5173
     volumes:
