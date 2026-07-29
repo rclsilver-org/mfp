@@ -34,16 +34,13 @@ async def scan_batch(session_id: str, actor: str, options: dict) -> dict:
     """Acquire the scanner, scan a batch, append pages to the session. Fail fast if busy."""
     global _held_by
     if _lock.locked():
-        print(f"[scanner] scan_batch REJECT: lock held by {_held_by}", flush=True)
         raise SessionBusy(_held_by or "someone")
     async with _lock:
         _held_by = actor
-        print(f"[scanner] scan_batch acquired lock for {actor}", flush=True)
         try:
             return await _do_scan(session_id, options)
         finally:
             _held_by = None
-            print(f"[scanner] scan_batch released lock ({actor})", flush=True)
 
 
 async def _do_scan(session_id: str, options: dict) -> dict:

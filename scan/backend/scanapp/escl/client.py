@@ -113,6 +113,10 @@ class EsclClient:
 
     def _scan_settings(self, source: str, color: str, resolution: int, page_size: str, fmt: str) -> bytes:
         w, h = PAGE_SIZES.get(page_size, PAGE_SIZES["A4"])
+        # 1-bit bilevel is incompatible with our JPEG pipeline and the device
+        # rejects BlackAndWhite1 + image/jpeg with 409 -> use 8-bit grayscale.
+        if color == "BlackAndWhite1":
+            color = "Grayscale8"
         input_source = "Feeder" if source.lower() in ("adf", "feeder") else "Platen"
         xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <scan:ScanSettings xmlns:scan="{NS['scan']}" xmlns:pwg="{NS['pwg']}">
@@ -140,30 +144,19 @@ class EsclClient:
         """Async generator yielding JPEG bytes, one per page."""
         feeder = source.lower() in ("adf", "feeder")
         body = self._scan_settings(source, color, resolution, page_size, fmt)
-        print(f"[escl] scan start source={source} color={color} res={resolution} "
-              f"size={page_size} base={self.base}", flush=True)
         async with self._client(timeout=settings.escl_job_timeout) as c:
-            # HP eSCL is single-request: ANY other request too close to ScanJobs
-            # (a status poll, or even our own pre-check) makes it return 503/409.
-            # So post the job FIRST (nothing before it), and only diagnose on
-            # failure. Retry with backoff to ride over transient states.
+            # Post the job first (nothing before it: on the single-request device
+            # a preceding request can itself trip a 503/409). Retry with backoff
+            # to ride over transient states, then diagnose on persistent failure.
             r = await c.post(f"{self.base}/eSCL/ScanJobs", content=body,
                              headers={"Content-Type": "text/xml"})
-            print(f"[escl] ScanJobs POST -> {r.status_code} loc={r.headers.get('Location')}", flush=True)
             attempt = 0
             while r.status_code in (409, 503) and attempt < 4:
                 attempt += 1
                 await asyncio.sleep(0.5 * attempt)
                 r = await c.post(f"{self.base}/eSCL/ScanJobs", content=body,
                                  headers={"Content-Type": "text/xml"})
-                print(f"[escl] ScanJobs POST retry {attempt} -> {r.status_code}", flush=True)
             if r.status_code in (409, 503):
-                # dump the device state so we can see WHY it keeps rejecting us
-                try:
-                    raw = (await c.get(f"{self.base}/eSCL/ScannerStatus")).text
-                    print(f"[escl] give up {r.status_code}; ScannerStatus:\n{raw[:900]}", flush=True)
-                except Exception as e:  # noqa: BLE001
-                    print(f"[escl] give up {r.status_code}; status dump failed: {e}", flush=True)
                 if feeder:
                     adf_state = (await self.status()).get("adf_state") or ""
                     if adf_state and "Loaded" not in adf_state:

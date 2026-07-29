@@ -324,8 +324,7 @@ export default function App() {
                 <label>Couleur
                   <select value={opts.color} onChange={e => setOpts({ ...opts, color: e.target.value })}>
                     <option value="RGB24">Couleur</option>
-                    <option value="Grayscale8">Gris</option>
-                    <option value="BlackAndWhite1">N&B</option>
+                    <option value="Grayscale8">Noir &amp; blanc</option>
                   </select>
                 </label>
                 <label>Résolution
