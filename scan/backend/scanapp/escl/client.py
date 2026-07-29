@@ -6,6 +6,7 @@ cancel. Platen yields 1 page, ADF yields N; the same NextDocument loop handles b
 """
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 
 import httpx
@@ -139,8 +140,17 @@ class EsclClient:
         """Async generator yielding JPEG bytes, one per page."""
         body = self._scan_settings(source, color, resolution, page_size, fmt)
         async with self._client(timeout=settings.escl_job_timeout) as c:
+            # HP eSCL is single-request: a concurrent request (e.g. a status poll)
+            # makes ScanJobs return 503/409. Retry with backoff to ride over the
+            # collision instead of surfacing a bogus "scanner busy".
             r = await c.post(f"{self.base}/eSCL/ScanJobs", content=body,
                              headers={"Content-Type": "text/xml"})
+            attempt = 0
+            while r.status_code in (409, 503) and attempt < 4:
+                attempt += 1
+                await asyncio.sleep(0.5 * attempt)
+                r = await c.post(f"{self.base}/eSCL/ScanJobs", content=body,
+                                 headers={"Content-Type": "text/xml"})
             if r.status_code in (409, 503):
                 raise ScannerBusy("scanner busy")
             if r.status_code not in (200, 201):

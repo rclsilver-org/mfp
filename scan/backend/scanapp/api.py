@@ -51,6 +51,11 @@ async def capabilities(_: LdapUser = Depends(require_printers)):
 
 @router.get("/scanner/status")
 async def scanner_status(_: LdapUser = Depends(require_printers)):
+    # a scan holds the single-request device: report busy without polling it,
+    # otherwise the poll collides with the scan job and the device returns 503/409
+    if scanner.is_busy():
+        return {"state": "Numérisation en cours…", "adf_state": None,
+                "idle": False, "busy": True, "held_by": scanner.held_by()}
     if settings.fake_scanner:
         st = {"state": "Idle (faux scanner)", "adf_state": None, "idle": True}
     else:

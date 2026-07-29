@@ -142,10 +142,13 @@ export default function App() {
 
   useEffect(() => {
     if (!me?.can_scan) return;
+    // pause polling while scanning: the eSCL device is single-request, so a status
+    // poll colliding with the scan job makes the device return 503/409 ("busy")
+    if (scanning) return;
     const t = setInterval(() => api("/scanner/status").then(r => r.json()).then(setStatus).catch(() => {}), 4000);
     api("/scanner/status").then(r => r.json()).then(setStatus).catch(() => {});
     return () => clearInterval(t);
-  }, [me]);
+  }, [me, scanning]);
 
   async function ensureSession(): Promise<string> {
     if (sid) return sid;
