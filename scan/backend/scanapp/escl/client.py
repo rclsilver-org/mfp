@@ -138,6 +138,14 @@ class EsclClient:
     async def scan(self, *, source="platen", color="RGB24", resolution=300,
                    page_size="A4", fmt="image/jpeg"):
         """Async generator yielding JPEG bytes, one per page."""
+        # An empty ADF makes the device reject ScanJobs with 409 (indistinguishable
+        # from a busy 409). Pre-check the feeder so we can report "empty" clearly
+        # instead of retrying and surfacing a bogus "scanner busy".
+        if source.lower() in ("adf", "feeder"):
+            adf_state = (await self.status()).get("adf_state") or ""
+            if adf_state and "Loaded" not in adf_state:
+                raise AdfEmptyOrJam("Chargeur (ADF) vide — rechargez le document")
+
         body = self._scan_settings(source, color, resolution, page_size, fmt)
         async with self._client(timeout=settings.escl_job_timeout) as c:
             # HP eSCL is single-request: a concurrent request (e.g. a status poll)

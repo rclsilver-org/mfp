@@ -204,7 +204,11 @@ export default function App() {
     try {
       const id = await ensureSession();
       const r = await api(`/sessions/${id}/scan`, { method: "POST", body: JSON.stringify(opts) });
-      if (!r.ok) { setMsg("Erreur scan: " + (await r.text())); }
+      if (!r.ok) {
+        let detail = await r.text();
+        try { detail = JSON.parse(detail).detail || detail; } catch { /* keep raw */ }
+        setMsg("Erreur scan : " + detail);
+      }
       await refresh(id);
     } catch (e: any) { setMsg(String(e)); }
     finally { setScanning(false); }
