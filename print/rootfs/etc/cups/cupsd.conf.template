@@ -15,12 +15,13 @@ Listen /run/cups/cups.sock
 DefaultEncryption IfRequested
 DefaultAuthType Basic
 Browsing Off
-WebInterface No
+# web UI toggle (No by default; set CUPS_WEB_INTERFACE=Yes to serve it on :631)
+WebInterface ${CUPS_WEB_INTERFACE}
 
 # Accept any Host: header. cupsd otherwise rejects requests whose Host is not one
 # of its known names ("invalid Host field"), which breaks clients reaching the
 # proxy through a DNS hostname instead of the raw IP.
-# Safe here: the web UI is off and every print operation requires @PRINT_GROUP auth.
+# Safe here: every print operation still requires @PRINT_GROUP auth.
 ServerAlias *
 
 <Location />
@@ -28,9 +29,11 @@ ServerAlias *
   Allow all
 </Location>
 
+# admin UI reachable from the LAN (view/manage printers & jobs); editing the
+# server config over the web (/admin/conf) stays localhost-only.
 <Location /admin>
   Order allow,deny
-  Allow localhost
+  Allow all
 </Location>
 
 <Location /admin/conf>

@@ -15,6 +15,9 @@ export PRINT_GROUP=${PRINT_GROUP:-printers}
 # they surface in the container logs; bump to "debug" to trace auth/job flow.
 export CUPS_LOG_LEVEL=${CUPS_LOG_LEVEL:-warn}
 
+# CUPS web interface (used in cupsd.conf.template). Off by default.
+export CUPS_WEB_INTERFACE=${CUPS_WEB_INTERFACE:-No}
+
 # Render templates / copy plain files from the rootfs mirror into place.
 find /docker-entrypoint.d/ -type f | while read filename; do
   out_dir="/$(dirname "${filename#/docker-entrypoint.d/}")"
